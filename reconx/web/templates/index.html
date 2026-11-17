@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReconX Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{background:radial-gradient(circle at 20% 30%,#1a1f35 0%,#0a0d17 100%);min-height:100vh}
+.card{background:rgba(22,27,34,.7);backdrop-filter:blur(10px);border:1px solid rgba(88,166,255,.15)}
+.glow{box-shadow:0 0 30px rgba(88,166,255,.2)}
+pre{white-space:pre-wrap;word-break:break-all}
+@keyframes pd{0%,100%{opacity:.3}50%{opacity:1}}.dot{animation:pd 1.4s ease-in-out infinite}
+</style>
+</head>
+<body class="text-gray-200 font-mono">
+<header class="border-b border-blue-500/20 bg-black/30 backdrop-blur">
+<div class="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center glow">
+<span class="text-black font-bold text-xl">R</span></div>
+<div><h1 class="text-xl font-bold text-cyan-400">ReconX</h1>
+<p class="text-xs text-gray-500">Professional Recon Framework v3.0</p></div>
+<span class="mr-auto text-xs text-gray-500">Termux Edition</span>
+</div></header>
+
+<main class="max-w-6xl mx-auto px-4 py-8">
+<section class="card rounded-xl p-6 mb-6">
+<h2 class="text-lg font-semibold mb-4 text-blue-400">▶ New Scan</h2>
+<div class="grid md:grid-cols-3 gap-4">
+<div class="md:col-span-2"><label class="block text-xs text-gray-500 mb-1">Target Domain</label>
+<input id="domain" placeholder="example.com" class="w-full bg-black/50 border border-blue-500/20 rounded-lg px-4 py-2.5 text-cyan-300 focus:outline-none focus:border-cyan-400"></div>
+<div><label class="block text-xs text-gray-500 mb-1">Threads</label>
+<input id="threads" type="number" value="15" min="1" max="30" class="w-full bg-black/50 border border-blue-500/20 rounded-lg px-4 py-2.5 text-cyan-300 focus:outline-none focus:border-cyan-400"></div>
+</div>
+<div class="grid grid-cols-3 gap-2 mt-4">
+<button data-mode="fast" class="mode-btn rounded-lg py-2 transition bg-blue-500/20 border border-blue-500/30 hover:bg-blue-500/30">🚀 Fast</button>
+<button data-mode="full" class="mode-btn rounded-lg py-2 transition bg-blue-500/20 border border-blue-500/30 hover:bg-blue-500/30">🔥 Full</button>
+<button data-mode="custom" class="mode-btn rounded-lg py-2 transition bg-blue-500/20 border border-blue-500/30 hover:bg-blue-500/30">⚙ Custom</button>
+</div>
+<div id="customFlags" class="hidden mt-3"><input id="flags" placeholder="--perm --crawl --nuclei --secrets" class="w-full bg-black/50 border border-blue-500/20 rounded-lg px-4 py-2.5 text-cyan-300 text-sm"></div>
+<button id="startBtn" class="w-full mt-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold py-3 rounded-lg hover:opacity-90 transition glow">▶ Start Scan</button>
+</section>
+
+<section id="progressSection" class="hidden card rounded-xl p-6 mb-6">
+<div class="flex items-center gap-3 mb-3">
+<div class="w-3 h-3 rounded-full bg-cyan-400 dot"></div>
+<span id="statusText" class="text-cyan-400">Starting...</span>
+<span id="elapsed" class="mr-auto text-xs text-gray-500"></span></div>
+<div class="bg-black/60 rounded-lg p-4 max-h-64 overflow-y-auto"><pre id="output" class="text-xs text-gray-400"></pre></div>
+</section>
+
+<section id="resultsSection" class="hidden">
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+<div class="card rounded-xl p-4 text-center"><div id="statTotal" class="text-3xl font-bold text-cyan-400">0</div><div class="text-xs text-gray-500 mt-1">Live Hosts</div></div>
+<div class="card rounded-xl p-4 text-center"><div id="statTakeover" class="text-3xl font-bold text-red-400">0</div><div class="text-xs text-gray-500 mt-1">Takeover</div></div>
+<div class="card rounded-xl p-4 text-center"><div id="statNuclei" class="text-3xl font-bold text-yellow-400">0</div><div class="text-xs text-gray-500 mt-1">Nuclei</div></div>
+<div class="card rounded-xl p-4 text-center"><div id="statSecrets" class="text-3xl font-bold text-purple-400">0</div><div class="text-xs text-gray-500 mt-1">Secrets</div></div>
+</div>
+
+<div class="card rounded-xl p-6">
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-lg font-semibold text-blue-400">📋 Live Hosts</h3>
+<a id="htmlLink" href="#" target="_blank" class="text-xs bg-blue-500/20 border border-blue-500/30 rounded px-3 py-1.5 hover:bg-blue-500/30">📄 HTML Report</a>
+</div>
+<div class="max-h-96 overflow-y-auto">
+<table class="w-full text-sm">
+<thead class="sticky top-0 bg-black/80"><tr class="text-xs text-gray-500">
+<th class="py-2 px-2 text-right">Host</th><th class="py-2 px-2 text-right">IP</th>
+<th class="py-2 px-2 text-right">ST</th><th class="py-2 px-2 text-right">Srv</th>
+<th class="py-2 px-2 text-right">N</th></tr></thead>
+<tbody id="hostsBody"></tbody></table>
+</div></div></section>
+
+<section class="card rounded-xl p-6 mt-6">
+<h3 class="text-sm font-semibold text-gray-400 mb-3">📜 Recent Scans</h3>
+<div id="history" class="text-xs space-y-1 text-gray-500">No scans yet</div>
+</section>
+</main>
+
+<footer class="text-center text-xs text-gray-600 py-6">ReconX v3.0 · Use responsibly</footer>
+
+<script>
+let currentMode='fast',currentScan=null,startTime=null;
+document.querySelectorAll('.mode-btn').forEach(b=>b.onclick=()=>{
+  currentMode=b.dataset.mode;
+  document.querySelectorAll('.mode-btn').forEach(x=>{x.classList.remove('bg-cyan-500/30','border-cyan-400');x.classList.add('bg-blue-500/20','border-blue-500/30')});
+  b.classList.remove('bg-blue-500/20','border-blue-500/30');b.classList.add('bg-cyan-500/30','border-cyan-400');
+  document.getElementById('customFlags').classList.toggle('hidden',currentMode!=='custom');
+});
+document.querySelector('.mode-btn').click();
+
+document.getElementById('startBtn').onclick=async()=>{
+  const d=document.getElementById('domain').value.trim();
+  if(!d){alert('Enter domain');return}
+  const btn=document.getElementById('startBtn');btn.disabled=true;btn.textContent='⏳ Starting...';
+  const body={domain:d,mode:currentMode,threads:parseInt(document.getElementById('threads').value)||15,flags:document.getElementById('flags')?.value||''};
+  try{
+    const r=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.error){alert(j.error);btn.disabled=false;btn.textContent='▶ Start Scan';return}
+    currentScan=j.scan_id;startTime=Date.now();
+    document.getElementById('progressSection').classList.remove('hidden');
+    document.getElementById('resultsSection').classList.add('hidden');
+    document.getElementById('output').textContent='';
+    pollScan();
+  }catch(e){alert('Error: '+e);btn.disabled=false;btn.textContent='▶ Start Scan'}
+};
+
+async function pollScan(){
+  if(!currentScan)return;
+  try{
+    const r=await fetch('/api/scan/'+currentScan);
+    const j=await r.json();
+    const out=document.getElementById('output');
+    out.textContent=j.output||'';out.scrollTop=out.scrollHeight;
+    document.getElementById('elapsed').textContent=Math.floor((Date.now()-startTime)/1000)+'s';
+    if(j.status==='done'||j.status==='failed'){
+      document.getElementById('statusText').textContent=j.status==='done'?'✅ Complete':'❌ Failed';
+      renderResults(j);
+      document.getElementById('startBtn').disabled=false;
+      document.getElementById('startBtn').textContent='▶ Start Scan';
+      refreshHistory();return;
+    }
+    document.getElementById('statusText').textContent='Scanning: '+(j.domain||'');
+    setTimeout(pollScan,1500);
+  }catch(e){setTimeout(pollScan,3000)}
+}
+
+function renderResults(j){
+  if(!j.result)return;
+  document.getElementById('resultsSection').classList.remove('hidden');
+  const s=j.result.stats||{};
+  document.getElementById('statTotal').textContent=s.live||0;
+  document.getElementById('statTakeover').textContent=s.takeover||0;
+  document.getElementById('statNuclei').textContent=s.nuclei||0;
+  document.getElementById('statSecrets').textContent=s.secrets||0;
+  const body=document.getElementById('hostsBody');body.innerHTML='';
+  (j.result.hosts||[]).forEach(h=>{
+    const tr=document.createElement('tr');
+    tr.className='border-t border-white/5 hover:bg-white/5';
+    const sc=h.status>=200&&h.status<300?'text-green-400':h.status>=400?'text-red-400':'text-yellow-400';
+    tr.innerHTML=`<td class="py-2 px-2 text-cyan-400">${h.host}</td>
+      <td class="py-2 px-2 text-gray-500">${h.ip||'-'}</td>
+      <td class="py-2 px-2 ${sc}">${h.status||'-'}</td>
+      <td class="py-2 px-2 text-gray-500">${(h.server||'-').slice(0,12)}</td>
+      <td class="py-2 px-2 ${h.nuclei>0?'text-yellow-400':''}">${h.nuclei||0}</td>`;
+    body.appendChild(tr);
+  });
+  if(j.result.html_report){const l=document.getElementById('htmlLink');l.href=j.result.html_report;l.style.display='inline-block'}
+}
+
+async function refreshHistory(){
+  try{
+    const r=await fetch('/api/scans');const scans=await r.json();
+    const h=document.getElementById('history');
+    if(!scans.length){h.textContent='No scans yet';return}
+    h.innerHTML=scans.slice(-8).reverse().map(s=>
+      `<div class="flex items-center gap-2 py-1">
+      <span class="w-2 h-2 rounded-full ${s.status==='done'?'bg-green-400':s.status==='failed'?'bg-red-400':'bg-yellow-400'}"></span>
+      <span class="text-cyan-400">${s.domain}</span>
+      <a href="/report/${s.domain}" target="_blank" class="mr-auto text-blue-400 hover:underline">report</a></div>`).join('');
+  }catch(e){}
+}
+refreshHistory();
+</script>
+</body></html>

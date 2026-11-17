@@ -8,7 +8,8 @@ from reconx.core.models import HostInfo
 class Database:
     def __init__(self, path):
         self.path = str(path)
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, timeout=30)
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
 
     def _init_schema(self):
@@ -19,14 +20,22 @@ class Database:
                 server TEXT, title TEXT, tech TEXT,
                 cdn TEXT, takeover TEXT, ports TEXT,
                 robots TEXT, sitemap TEXT, endpoints TEXT,
-                screenshot TEXT, nuclei TEXT, ts TEXT
+                screenshot TEXT, nuclei TEXT, ts TEXT,
+                secrets TEXT, cors TEXT, js_endpoints TEXT, s3_buckets TEXT,
+                status_category TEXT
             )
         """)
+        # migration: أضف أعمدة ناقصة للـDBs القديمة
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(hosts)").fetchall()}
+        for col in ["secrets", "cors", "js_endpoints", "s3_buckets", "status_category"]:
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE hosts ADD COLUMN {col} TEXT")
+        self.conn.commit()
         self.conn.commit()
 
     def save(self, info: HostInfo):
         self.conn.execute(
-            "INSERT OR REPLACE INTO hosts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO hosts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 info.host, info.ip, info.cname, info.status,
                 info.server, info.title, ",".join(info.tech),
@@ -35,6 +44,11 @@ class Database:
                 ",".join(info.endpoints), info.screenshot,
                 json.dumps(info.nuclei),
                 datetime.utcnow().isoformat(),
+                json.dumps(getattr(info, "secrets", [])),
+                json.dumps(getattr(info, "cors", {})),
+                ",".join(getattr(info, "js_endpoints", [])),
+                json.dumps(getattr(info, "s3_buckets", [])),
+                getattr(info, "status_category", ""),
             ),
         )
         self.conn.commit()

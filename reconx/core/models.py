@@ -2,7 +2,6 @@
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-
 @dataclass
 class HostInfo:
     host: str
@@ -20,6 +19,12 @@ class HostInfo:
     endpoints: list = field(default_factory=list)
     screenshot: Optional[str] = None
     nuclei: list = field(default_factory=list)
+    secrets: list = field(default_factory=list)
+    cors: dict = field(default_factory=dict)
+    js_endpoints: list = field(default_factory=list)
+    s3_buckets: list = field(default_factory=list)
+    status_category: str = "unknown"
+    soft404: bool = False
 
     def to_dict(self):
         return asdict(self)

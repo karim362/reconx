@@ -1,0 +1,170 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# ReconX Interactive UI
+
+cd ~/reconx
+export PYTHONPATH="$PWD:$PYTHONPATH"
+
+clear
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║   ReconX — Interactive Recon Tool        ║"
+echo "║   v3.0 | Termux Edition                  ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+# 1. السؤال عن الدومين
+read -p "🎯 Target domain (e.g. example.com): " DOMAIN
+
+if [ -z "$DOMAIN" ]; then
+    echo "❌ Domain required"
+    exit 1
+fi
+
+# تنظيف الإدخال
+DOMAIN=$(echo "$DOMAIN" | sed 's|https\?://||' | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
+
+# 2. اختيار نوع الفحص
+echo ""
+echo "📋 Choose scan type:"
+echo ""
+echo "  [1] 🚀 Fast          — 2-3 min (subdomains only)"
+echo "  [2] ⚡ Standard      — 5-8 min (subdomains + httpx + probe)"
+echo "  [3] 🔥 Full          — 15-25 min (everything + nuclei)"
+echo "  [4] 🎯 Custom        — choose yourself"
+echo ""
+read -p "Your choice [1-4]: " CHOICE
+
+case $CHOICE in
+    1)
+        FLAGS="--fast"
+        TYPE="Fast"
+        ;;
+    2)
+        FLAGS="--perm --httpx -t 15"
+        TYPE="Standard"
+        ;;
+    3)
+        FLAGS="--all -t 15"
+        TYPE="Full"
+        ;;
+    4)
+        echo ""
+        echo "Enter flags (e.g. --perm --crawl --httpx --nuclei):"
+        read -p "> " FLAGS
+        TYPE="Custom"
+        ;;
+    *)
+        echo "❌ Invalid choice"
+        exit 1
+        ;;
+esac
+
+# 3. اختيار عدد threads
+echo ""
+read -p "⚙️  Threads (default 15, max 30): " THREADS
+THREADS=${THREADS:-15}
+
+# 4. تأكيد
+echo ""
+echo "═══════════════════════════════════════════"
+echo "  🎯 Target:   $DOMAIN"
+echo "  📋 Type:     $TYPE"
+echo "  ⚙️  Threads:  $THREADS"
+echo "  🕐 Started:  $(date '+%H:%M:%S')"
+echo "═══════════════════════════════════════════"
+echo ""
+read -p "Start scan? [Y/n]: " CONFIRM
+
+if [[ ! "$CONFIRM" =~ ^[Yy]?$ ]]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+# 5. تنفيذ
+echo ""
+echo "🚀 Starting scan..."
+echo ""
+
+termux-wake-lock 2>/dev/null
+python -m reconx -d "$DOMAIN" $FLAGS -t "$THREADS"
+RESULT=$?
+termux-wake-unlock 2>/dev/null
+
+# 6. عرض النتائج
+if [ $RESULT -eq 0 ]; then
+    echo ""
+    echo "═══════════════════════════════════════════"
+    echo "  ✅ SCAN COMPLETE"
+    echo "═══════════════════════════════════════════"
+    echo ""
+
+    OUT_DIR=~/reconx/output/"$DOMAIN"
+
+    if [ -d "$OUT_DIR" ]; then
+        echo "📁 Results:"
+        echo ""
+
+        # live hosts
+        if [ -f "$OUT_DIR/${DOMAIN}_live.txt" ]; then
+            LIVE=$(wc -l < "$OUT_DIR/${DOMAIN}_live.txt")
+            echo "  ✓ Live hosts:       $LIVE"
+        fi
+
+        # endpoints
+        if [ -f "$OUT_DIR/${DOMAIN}_endpoints.txt" ]; then
+            EP=$(wc -l < "$OUT_DIR/${DOMAIN}_endpoints.txt")
+            echo "  ✓ Endpoints:        $EP"
+        fi
+
+        # nuclei
+        if [ -f "$OUT_DIR/${DOMAIN}.db" ]; then
+            NC=$(sqlite3 "$OUT_DIR/${DOMAIN}.db" "SELECT COUNT(*) FROM hosts WHERE nuclei != '[]' AND nuclei IS NOT NULL" 2>/dev/null || echo "0")
+            echo "  ✓ Nuclei findings:  $NC"
+        fi
+
+        echo ""
+        echo "📄 Files:"
+        echo ""
+        ls -1 "$OUT_DIR" | grep -E '\.(txt|csv|json|db|md|html)$' | while read f; do
+            SIZE=$(du -h "$OUT_DIR/$f" | cut -f1)
+            echo "  • $f ($SIZE)"
+        done
+
+        echo ""
+
+        # نسخ HTML للـDownloads
+        if [ -f "$OUT_DIR/${DOMAIN}_report.html" ]; then
+            cp "$OUT_DIR/${DOMAIN}_report.html" ~/storage/downloads/ 2>/dev/null && \
+                echo "📱 HTML report copied to ~/storage/downloads/${DOMAIN}_report.html"
+        fi
+
+        echo ""
+        echo "🖥️  Open HTML report:"
+        echo "    cp $OUT_DIR/${DOMAIN}_report.html ~/storage/downloads/"
+        echo ""
+
+        # أسئلة إضافية
+        read -p "📂 Show live hosts? [y/N]: " SHOW
+        if [[ "$SHOW" =~ ^[Yy]$ ]]; then
+            echo ""
+            cat "$OUT_DIR/${DOMAIN}_live.txt"
+        fi
+
+        read -p "🔍 Show takeover/nuclei findings? [y/N]: " SHOW2
+        if [[ "$SHOW2" =~ ^[Yy]$ ]]; then
+            echo ""
+            echo "=== Takeover ==="
+            sqlite3 "$OUT_DIR/${DOMAIN}.db" "SELECT host, takeover FROM hosts WHERE takeover IS NOT NULL" 2>/dev/null
+            echo ""
+            echo "=== Nuclei ==="
+            sqlite3 "$OUT_DIR/${DOMAIN}.db" "SELECT host, nuclei FROM hosts WHERE nuclei != '[]' AND nuclei IS NOT NULL" 2>/dev/null
+        fi
+    fi
+else
+    echo ""
+    echo "❌ Scan failed (exit code: $RESULT)"
+fi
+
+echo ""
+echo "Done. Goodbye! 👋"
+echo ""

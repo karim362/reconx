@@ -6,7 +6,7 @@ from reconx.core.dns import dns_lookup
 from reconx.core.config import BASE_DIR
 
 
-WORDLIST_PATH = BASE_DIR / "wordlists" / "subs-5000.txt"
+WORDLIST_PATH = BASE_DIR / "wordlists" / "subs-1000.txt"
 
 
 def _load_wordlist(path):
@@ -16,7 +16,7 @@ def _load_wordlist(path):
         return [l.strip() for l in f if l.strip() and not l.startswith("#")]
 
 
-def bruteforce(domain, wordlist=None, threads=20, progress_cb=None):
+def bruteforce(domain, wordlist=None, threads=50, progress_cb=None):
     words = wordlist or _load_wordlist(WORDLIST_PATH)
     if not words:
         return set()

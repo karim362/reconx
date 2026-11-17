@@ -11,12 +11,15 @@ from rich.panel import Panel
 from reconx.core import config
 from reconx.core.database import Database
 from reconx.core.smart_scanner import scan_batches
-from reconx.core.dns import wildcard_ips, dns_lookup, HAS_DNS
+from reconx.core.dns import dns_lookup, HAS_DNS
+from reconx.core.wildcard import detect as wildcard_detect, is_valid_host
 from reconx.core.session import http_get
 from reconx.core.models import HostInfo
 
 from reconx.sources.manager import collect
-from reconx.detect import cdn, tech, takeover, ports, robots, sitemap, crawler, external, bruteforce
+from reconx.detect import cdn, tech, takeover, ports, robots, sitemap, crawler, external, bruteforce, soft404, status, secrets, s3, js_analysis, cors
+from reconx.output import diff
+from reconx.notify import telegram
 from reconx.utils.clean import clean_subdomain
 from reconx.utils.perm import generate as gen_perms
 
@@ -26,7 +29,7 @@ from reconx.ui.progress import make_progress
 
 from reconx.output import txt, csv_out, json_out, markdown, html_report
 
-console = Console()
+console = Console(force_terminal=True, force_interactive=True, color_system='standard')
 
 
 # ─────────────────────────────────────────────
@@ -80,6 +83,29 @@ def probe_host(host, opts):
     if opts.get("nuclei") and base_url and info.status:
         info.nuclei = external.run_nuclei(host)
 
+    # NEW: status category
+    info.status_category = status.categorize(info.status)
+
+    # NEW: secrets scan
+    if opts.get("secrets") and body:
+        info.secrets = secrets.scan(body)
+
+    # NEW: CORS check
+    if opts.get("cors") and base_url:
+        info.cors = cors.check(base_url)
+
+    # NEW: JS analysis
+    if opts.get("js") and base_url and body:
+        js_urls = js_analysis.extract_urls(body, base_url)
+        js_eps, js_ext = js_analysis.analyze(js_urls)
+        info.js_endpoints = js_eps
+
+    # NEW: S3 detection
+    if opts.get("s3") and body:
+        buckets = s3.extract(body)
+        for b in list(buckets)[:3]:
+            info.s3_buckets.append(s3.check(b))
+
     return info
 
 
@@ -94,12 +120,14 @@ def recon_domain(domain, args):
     t0 = time.time()
 
     # 1) Wildcard
-    with console.status("[cyan]Checking wildcard DNS...[/cyan]", spinner="dots"):
-        wc = wildcard_ips(domain)
-    if wc:
-        console.print(f"[yellow]⚠ Wildcard: {wc}[/yellow]")
+    with console.status("[cyan]Checking wildcard DNS (3 samples)...[/cyan]", spinner="dots"):
+        wc_info = wildcard_detect(domain, samples=3)
+    wc = wc_info["ips"] if wc_info["is_wildcard"] else None
+    if wc_info["is_wildcard"]:
+        console.print(f"[yellow]⚠ Wildcard DNS detected: {list(wc)[:3]}{'...' if len(wc)>3 else ''}[/yellow]")
+        console.print(f"   Will filter {len(wc)} wildcard IPs from results")
     else:
-        console.print("[green]✓ No wildcard[/green]")
+        console.print("[green]✓ No wildcard DNS[/green]")
 
     # 2) Resume
     db_path = out / f"{domain}.db"
@@ -138,55 +166,25 @@ def recon_domain(domain, args):
 
     # 4) Permutations
     if args.perm and raw:
-        console.print("[bold cyan][2/6][/bold cyan] Permutations...")
-        perms = gen_perms(raw, domain)
+        # smart mode: فقط high-value افتراضياً
+        perm_mode = "all" if getattr(args, 'all', False) else "high"
+        console.print(f"[bold cyan][2/6][/bold cyan] Permutations (mode={perm_mode})...")
+        perms = gen_perms(raw, domain, mode=perm_mode)
         raw.update(perms)
-        console.print(f"  → {len(perms)} generated")
+        console.print(f"  → {len(perms)} generated (smart)")
     else:
         console.print("[bold cyan][2/6][/bold cyan] Permutations skipped")
 
     console.print(f"[green]✓ Unique: {len(raw)}[/green]")
     txt.write(out / f"{domain}_all.txt", raw)
 
-    # 5) httpx smart batch scanning
+    # 5) httpx skipped (using probe_host instead)
     httpx_results = {}
-    if args.httpx and external.tool_available("httpx"):
-        to_check = list(raw - done_hosts)
-        if to_check:
-            console.print(f"[bold cyan][3/6][/bold cyan] httpx smart-scan {len(to_check)} hosts (batches)...")
-
-            def _batch(subset):
-                return external.run_httpx(
-                    subset, threads=min(args.threads, 20), timeout=300)
-
-            httpx_results, stats = scan_batches(
-                to_check, domain, _batch,
-                max_batches=4, min_live_per_batch=3)
-
-            total_tested = sum(s.get("size", 0) for s in stats if "size" in s)
-            total_time = sum(s.get("elapsed", 0) for s in stats if "elapsed" in s)
-
-            console.print(f"  -> httpx live: [green]{len(httpx_results)}[/green] / {total_tested} tested in {total_time:.0f}s")
-
-            # print batch breakdown
-            for s in stats:
-                if "tier" in s and isinstance(s["tier"], int):
-                    console.print(f"     batch {s['tier']}: {s['size']} tested, {s['found']} live ({s['elapsed']:.1f}s)")
-                elif "early_stop" in str(s):
-                    console.print(f"     [yellow]early stop: {s.get('reason', '')}[/yellow]")
-    else:
-        console.print("[bold cyan][3/6][/bold cyan] httpx skipped")
+    console.print("[bold cyan][3/6][/bold cyan] httpx skipped (probe_host will handle everything)")
 
     # 6) Full probe
     to_probe = [h for h in raw if h not in done_hosts]
-    # DNS pre-filter: skip hosts without A record (saves ~80% probing time)
-    console.print(f"[bold cyan][3.5/6][/bold cyan] DNS pre-filter {len(to_probe)} hosts...")
-    from reconx.core.dns import dns_lookup as _dns
-    from concurrent.futures import ThreadPoolExecutor as _TPE
-    with _TPE(max_workers=50) as _ex:
-        alive = list(_ex.map(lambda h: h if _dns(h)[0] else None, to_probe))
-    to_probe = [h for h in alive if h]
-    console.print(f"  -> [green]{len(to_probe)}[/green] hosts have DNS (filtered from {len(raw)})")
+
     # pre-filter: skip hosts without DNS (saves ~80% of probing time)
     console.print(f"[bold cyan][3.5/6][/bold cyan] DNS pre-filter {len(to_probe)} hosts...")
     from reconx.core.dns import dns_lookup as _dns
@@ -203,6 +201,10 @@ def recon_domain(domain, args):
         "sitemap": not args.no_sitemap and not args.fast,
         "crawl":   args.crawl,
         "nuclei":  args.nuclei,
+        "secrets": args.secrets,
+        "cors":    args.cors,
+        "js":      args.js,
+        "s3":      args.s3,
     }
 
     with make_progress("[green]live:{task.fields[live]}[/green]") as prog:
@@ -244,6 +246,30 @@ def recon_domain(domain, args):
         console.print(results_table(live,
                                     show_nuclei=opts["nuclei"],
                                     show_screens=args.screenshots))
+
+    # Diff reports
+    if args.diff:
+        snapshot_path = out / f"{domain}_prev.txt"
+        prev = diff.load_snapshot(snapshot_path)
+        if prev:
+            d = diff.compute(prev, [h.host for h in live])
+            console.print(f"\n[bold cyan]Diff vs last scan:[/bold cyan]")
+            console.print(diff.format_text(d))
+        diff.save_snapshot(snapshot_path, [h.host for h in live])
+        console.print(f"[dim]Snapshot saved: {snapshot_path.name}[/dim]")
+
+    # Telegram
+    if args.telegram_token and args.telegram_chat:
+        takeovers = [h.host for h in live if h.takeover]
+        nuclei_hits = [(h.host, len(h.nuclei)) for h in live if h.nuclei]
+        secrets_all = [s for h in live for s in h.secrets]
+        msg = telegram.format_result(domain, live, takeovers, nuclei_hits, secrets_all)
+        ok = telegram.send(args.telegram_token, args.telegram_chat, msg)
+        if ok:
+            console.print("[green]Telegram notification sent[/green]")
+        else:
+            console.print("[yellow]Telegram send failed[/yellow]")
+
     return live
 
 
@@ -271,11 +297,20 @@ def main():
     ap.add_argument("--no-ports", action="store_true")
     ap.add_argument("--no-robots", action="store_true")
     ap.add_argument("--no-sitemap", action="store_true")
+    ap.add_argument("--secrets", action="store_true", help="Scan for API keys/tokens")
+    ap.add_argument("--cors", action="store_true", help="CORS misconfig check")
+    ap.add_argument("--js", action="store_true", help="Analyze JS files")
+    ap.add_argument("--s3", action="store_true", help="S3 bucket detection")
+    ap.add_argument("--soft404", action="store_true", help="Soft 404 filter (recommended)")
+    ap.add_argument("--diff", action="store_true", help="Diff with last scan")
+    ap.add_argument("--telegram-token", help="Telegram bot token")
+    ap.add_argument("--telegram-chat", help="Telegram chat ID")
     args = ap.parse_args()
 
     if args.all:
         args.perm = args.crawl = args.nuclei = True
         args.screenshots = args.httpx = args.brute = True
+        args.secrets = args.cors = args.js = args.s3 = args.soft404 = True
 
     # sanity checks
     if not HAS_DNS:

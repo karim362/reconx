@@ -38,14 +38,16 @@ def run_httpx(hosts, threads=10, timeout=180):
         proc = subprocess.run(
             [_tool_path("httpx"), "-l", str(tmp), "-silent", "-json",
              "-title", "-tech-detect", "-status-code", "-web-server",
-             "-cdn", "-no-color", "-timeout", "6",
-             "-threads", str(threads), "-rate-limit", "50"],
+             "-cdn", "-no-color", "-timeout", "8",
+             "-threads", str(threads), "-rate-limit", "50",
+             "-retries", "2"],  # follow redirects to get final status
             capture_output=True, text=True, timeout=timeout)
         results = {}
         for line in proc.stdout.splitlines():
             try:
                 d = json.loads(line)
                 host = d.get("input", "")
+                # قبول أي status code (حتى 0 أو None)
                 results[host] = {
                     "status": d.get("status_code"),
                     "title": d.get("title", ""),
