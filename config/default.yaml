@@ -1,0 +1,9 @@
+http:
+  timeout: 12
+  retries: 2
+threads:
+  default: 15
+  max: 100
+dns:
+  servers: ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
+ports: [80, 443, 8080, 8443, 8000, 3000, 5000, 9000]
