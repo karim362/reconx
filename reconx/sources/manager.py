@@ -1,13 +1,15 @@
-"""Orchestrates collection from all sources."""
+"""Orchestrates passive collection from all sources."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from reconx.sources import (crtsh, hackertarget, rapiddns, alienvault,
-                            urlscan, wayback, certspotter)
+from reconx.sources import (
+    crtsh, hackertarget, rapiddns, alienvault,
+    chaos, anubis, mnemonic, securitytrails,
+)
 from reconx.utils.clean import clean_subdomain
 from reconx.core.dns import dns_lookup
 
 ALL_SOURCES = [
     crtsh, hackertarget, rapiddns, alienvault,
-    urlscan, wayback, certspotter,
+    chaos, anubis, mnemonic, securitytrails,
 ]
 
 

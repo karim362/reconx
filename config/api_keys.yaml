@@ -1,0 +1,7 @@
+# ReconX API Keys (optional)
+shodan: ""
+censys_id: ""
+censys_secret: ""
+virustotal: ""
+securitytrails: ""
+chaos: ""

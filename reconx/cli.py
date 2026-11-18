@@ -142,7 +142,7 @@ def recon_domain(domain, args):
             console.print(f"[yellow]♻ Resume: {len(prev)} hosts[/yellow]")
 
     # 3) Collect sources
-    console.print(f"\n[bold cyan][1/6][/bold cyan] Collecting from sources...")
+    console.print(f"\n[bold cyan][1/5][/bold cyan] Collecting from sources...")
     raw = set()
     with make_progress() as prog:
         task = prog.add_task("sources", total=8)
@@ -151,49 +151,26 @@ def recon_domain(domain, args):
                         description=f"{name}: +{count}")
         raw = collect(domain, wildcard=wc, progress_cb=cb)
 
-    # 3b) Bruteforce
-    if args.brute:
-        console.print("[bold cyan][2.5/6][/bold cyan] DNS bruteforce...")
-        with make_progress() as prog:
-            t = prog.add_task("brute", total=1)
-            def bcb(done, total, found):
-                prog.update(t, completed=done, total=total,
-                            description=f"bruteforce: {done}/{total} ({found} found)")
-            brute_subs = bruteforce.bruteforce(domain, threads=args.threads,
-                                               progress_cb=bcb)
-        console.print(f"  -> {len(brute_subs)} new from bruteforce")
-        raw.update(brute_subs)
-
-    # 4) Permutations
-    if args.perm and raw:
-        # smart mode: فقط high-value افتراضياً
-        perm_mode = "all" if getattr(args, 'all', False) else "high"
-        console.print(f"[bold cyan][2/6][/bold cyan] Permutations (mode={perm_mode})...")
-        perms = gen_perms(raw, domain, mode=perm_mode)
-        raw.update(perms)
-        console.print(f"  → {len(perms)} generated (smart)")
-    else:
-        console.print("[bold cyan][2/6][/bold cyan] Permutations skipped")
 
     console.print(f"[green]✓ Unique: {len(raw)}[/green]")
     txt.write(out / f"{domain}_all.txt", raw)
 
     # 5) httpx skipped (using probe_host instead)
     httpx_results = {}
-    console.print("[bold cyan][3/6][/bold cyan] httpx skipped (probe_host will handle everything)")
+    console.print("[bold cyan][3/5][/bold cyan] httpx skipped (probe_host will handle everything)")
 
     # 6) Full probe
     to_probe = [h for h in raw if h not in done_hosts]
 
     # pre-filter: skip hosts without DNS (saves ~80% of probing time)
-    console.print(f"[bold cyan][3.5/6][/bold cyan] DNS pre-filter {len(to_probe)} hosts...")
+    console.print(f"[bold cyan][3.5/5][/bold cyan] DNS pre-filter {len(to_probe)} hosts...")
     from reconx.core.dns import dns_lookup as _dns
     from concurrent.futures import ThreadPoolExecutor as _TPE
     with _TPE(max_workers=50) as _ex:
         alive = list(_ex.map(lambda h: h if _dns(h)[0] else None, to_probe))
     to_probe = [h for h in alive if h]
     console.print(f"  -> {len(to_probe)} hosts have DNS (filtered)")
-    console.print(f"[bold cyan][4/6][/bold cyan] Probing {len(to_probe)} hosts ({args.threads} threads)...")
+    console.print(f"[bold cyan][4/5][/bold cyan] Probing {len(to_probe)} hosts ({args.threads} threads)...")
 
     opts = {
         "ports":   not args.no_ports and not args.fast,
@@ -220,15 +197,15 @@ def recon_domain(domain, args):
 
     # 7) Screenshots
     if args.screenshots and external.tool_available("gowitness") and live:
-        console.print(f"[bold cyan][5/6][/bold cyan] Screenshots {len(live)}...")
+        console.print(f"[bold cyan][5/5][/bold cyan] Screenshots {len(live)}...")
         external.run_gowitness([h.host for h in live], out)
     else:
-        console.print("[bold cyan][5/6][/bold cyan] Screenshots skipped")
+        console.print("[bold cyan][5/5][/bold cyan] Screenshots skipped")
 
     db.close()
 
     # 8) Outputs
-    console.print("[bold cyan][6/6][/bold cyan] Writing outputs...")
+    console.print("[bold cyan][5/5][/bold cyan] Writing outputs...")
     elapsed = time.time() - t0
     txt.write(out / f"{domain}_live.txt", [h.host for h in live])
     csv_out.write(out / f"{domain}_live.csv", live)
@@ -285,13 +262,10 @@ def main():
     ap.add_argument("-t", "--threads", type=int, default=config.DEFAULT_THREADS)
     ap.add_argument("--all", action="store_true",
                     help="Enable perm+crawl+nuclei+screenshots+httpx")
-    ap.add_argument("--perm", action="store_true")
     ap.add_argument("--crawl", action="store_true")
     ap.add_argument("--nuclei", action="store_true")
     ap.add_argument("--screenshots", action="store_true")
     ap.add_argument("--httpx", action="store_true")
-    ap.add_argument("--brute", action="store_true",
-                    help="DNS bruteforce with wordlist")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--no-ports", action="store_true")
@@ -308,8 +282,8 @@ def main():
     args = ap.parse_args()
 
     if args.all:
-        args.perm = args.crawl = args.nuclei = True
-        args.screenshots = args.httpx = args.brute = True
+        args.crawl = args.nuclei = True
+        args.screenshots = args.httpx = True
         args.secrets = args.cors = args.js = args.s3 = args.soft404 = True
 
     # sanity checks
