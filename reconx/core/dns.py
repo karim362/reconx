@@ -1,62 +1,44 @@
-"""DNS resolution with dnspython, socket fallback (Termux-safe)."""
+"""DNS with DoH (bypasses ISP hijacking)."""
 import os
 import socket
-import random
-from reconx.core.config import DNS_SERVERS, DNS_TIMEOUT
+from reconx.core.config import DNS_TIMEOUT
 
-# ─────────────────────────────────────────────
-# Termux compatibility: /etc/resolv.conf is missing.
-# We must configure the resolver WITHOUT auto-loading it.
-# ─────────────────────────────────────────────
-def _build_resolver():
-    try:
-        import dns.resolver
-    except ImportError:
-        return None, False
+DOH_URL = "https://cloudflare-dns.com/dns-query"
+HAS_DNS = True
 
+
+def _doh_lookup(host, rtype="A"):
+    """Resolve via Cloudflare DoH."""
+    import requests
     try:
-        # configure=False → skip reading /etc/resolv.conf
-        resolver = dns.resolver.Resolver(configure=False)
-        resolver.timeout = DNS_TIMEOUT
-        resolver.lifetime = DNS_TIMEOUT
-        resolver.nameservers = DNS_SERVERS
-        return resolver, True
+        r = requests.get(
+            DOH_URL,
+            params={"name": host, "type": rtype},
+            headers={"accept": "application/dns-json"},
+            timeout=DNS_TIMEOUT,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            answers = data.get("Answer", [])
+            return [a["data"] for a in answers if a.get("type") == (1 if rtype == "A" else 5)]
     except Exception:
-        # ultimate fallback: socket only
-        return None, False
-
-
-_RESOLVER, HAS_DNS = _build_resolver()
+        pass
+    return []
 
 
 def dns_lookup(host):
-    """Return (ip, cname) or (None, None)."""
-    if _RESOLVER is not None:
-        try:
-            answers = _RESOLVER.resolve(host, "A")
-            ip = str(answers[0])
-            cname = None
-            try:
-                cn = _RESOLVER.resolve(host, "CNAME")
-                cname = str(cn[0]).rstrip(".").lower()
-            except Exception:
-                pass
-            return ip, cname
-        except Exception:
-            pass  # fallback to socket
-    try:
-        return socket.gethostbyname(host), None
-    except Exception:
-        return None, None
+    """Return (ip, cname) or (None, None) using DoH."""
+    ips = _doh_lookup(host, "A")
+    if ips:
+        cnames = _doh_lookup(host, "CNAME")
+        cname = cnames[0].rstrip(".").lower() if cnames else None
+        return ips[0], cname
+    return None, None
 
 
 def wildcard_ips(domain):
-    """Detect wildcard DNS. Return set of IPs or None."""
+    """Detect wildcard DNS via DoH."""
+    import random
     fake = f"nx-{random.randint(10**8, 10**9)}.{domain}"
-    ips = set()
-    try:
-        for r in socket.getaddrinfo(fake, None):
-            ips.add(r[4][0])
-    except socket.gaierror:
-        return None
-    return ips
+    ips = set(_doh_lookup(fake, "A"))
+    return ips if ips else None

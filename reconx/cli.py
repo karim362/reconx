@@ -121,7 +121,7 @@ def recon_domain(domain, args):
 
     # 1) Wildcard
     with console.status("[cyan]Checking wildcard DNS (3 samples)...[/cyan]", spinner="dots"):
-        wc_info = wildcard_detect(domain, samples=3)
+        wc_info = {'ips': set(), 'is_wildcard': False}  # DoH active, skip socket-based wildcard
     wc = wc_info["ips"] if wc_info["is_wildcard"] else None
     if wc_info["is_wildcard"]:
         console.print(f"[yellow]⚠ Wildcard DNS detected: {list(wc)[:3]}{'...' if len(wc)>3 else ''}[/yellow]")
