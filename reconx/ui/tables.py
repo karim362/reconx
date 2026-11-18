@@ -1,50 +1,44 @@
+"""Terminal tables and formatting."""
 from rich.table import Table
-from rich import box
 
-
-def results_table(results, show_nuclei=False, show_screens=False):
-    t = Table(box=box.SIMPLE_HEAVY, expand=False)
-    t.add_column("Host", style="cyan", max_width=38)
-    t.add_column("ST", justify="center", width=4)
-    t.add_column("Srv", style="magenta", max_width=10)
-    t.add_column("CDN", style="blue", max_width=8)
+def results_table(live, show_nuclei=False, show_screens=False):
+    table = Table(title="[bold cyan]Live Targets & Recon Summary[/bold cyan]", show_lines=False)
+    table.add_column("Host", style="cyan", no_wrap=True)
+    table.add_column("Status", justify="center")
+    table.add_column("Server", style="magenta")
+    table.add_column("CDN", style="yellow")
+    table.add_column("Takeover", style="bold red")
     if show_nuclei:
-        t.add_column("N", justify="center", width=3)
-    if show_screens:
-        t.add_column("SS", justify="center", width=3)
-    t.add_column("!", justify="center", width=2)
+        table.add_column("Nuclei", style="red")
 
-    for h in results:
-        st_style = "green" if h.status and h.status < 400 else \
-                   "yellow" if h.status else "red"
+    for h in live:
+        status_style = "green" if h.status == 200 else ("yellow" if h.status in [403, 401] else "blue")
+        status_str = f"[{status_style}]{h.status}[/{status_style}]" if h.status else "[dim]-[/dim]"
+        takeover_str = "⚠ VULN" if h.takeover else "[dim]-[/dim]"
+        
         row = [
-            h.host[:38],
-            f"[{st_style}]{h.status or '-'}[/{st_style}]",
-            (h.server or "-")[:9],
-            (h.cdn or "-")[:8],
+            h.host,
+            status_str,
+            h.server or "-",
+            h.cdn or "-",
+            takeover_str
         ]
         if show_nuclei:
-            n = len(h.nuclei)
-            row.append(f"[red]{n}[/red]" if n else "-")
-        if show_screens:
-            row.append("Y" if h.screenshot else "-")
-        row.append("[red]![/red]" if h.takeover else "")
-        t.add_row(*row)
-    return t
+            row.append(str(len(h.nuclei)) if h.nuclei else "0")
+        table.add_row(*row)
 
+    return table
 
 def summary_table(summary):
-    st = Table(box=box.HEAVY, title="Global Summary")
-    st.add_column("Domain", style="cyan")
-    st.add_column("Live", justify="right", style="green")
-    st.add_column("Takeover", justify="right", style="red")
-    st.add_column("Nuclei", justify="right", style="red")
-    tl = tt = tn = 0
-    for d, live in summary:
-        takes = sum(1 for h in live if h.takeover)
-        nucs = sum(len(h.nuclei) for h in live)
-        tl += len(live); tt += takes; tn += nucs
-        st.add_row(d, str(len(live)), str(takes), str(nucs))
-    st.add_row("[bold]TOTAL[/bold]", f"[bold]{tl}[/bold]",
-               f"[bold]{tt}[/bold]", f"[bold]{tn}[/bold]")
-    return st
+    table = Table(title="[bold green]Global Summary[/bold green]")
+    table.add_column("Domain", style="cyan")
+    table.add_column("Live", justify="right", style="green")
+    table.add_column("Takeover", justify="right", style="red")
+    table.add_column("Nuclei", justify="right", style="yellow")
+
+    for domain, live in summary:
+        takeovers = sum(1 for h in live if h.takeover)
+        nuclei_hits = sum(len(h.nuclei) for h in live if h.nuclei)
+        table.add_row(domain, str(len(live)), str(takeovers), str(nuclei_hits))
+
+    return table

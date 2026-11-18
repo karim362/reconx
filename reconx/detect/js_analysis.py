@@ -1,38 +1,70 @@
-"""JS analysis."""
+"""JS analysis - Production Grade."""
 import re
+from typing import List, Tuple, Set
 from urllib.parse import urljoin
 from reconx.core.session import http_get
 
-JS_PATS = [
-    r'["\x27](/api/[\w\-/\.]+)["\x27]',
-    r'["\x27](/v[0-9]/[\w\-/\.]+)["\x27]',
-    r'fetch\(["\x27]([^"\x27]+)["\x27]',
-    r'axios\.[a-z]+\(["\x27]([^"\x27]+)["\x27]',
+# تعابير منتظمة مجمعة ومحسنة للأداء
+JS_PATTERNS = [
+    re.compile(r'["\x27](/api/[\w\-/\.]+)["\x27]'),
+    re.compile(r'["\x27](/v[0-9]/[\w\-/\.]+)["\x27]'),
+    re.compile(r'fetch\s*\(\s*["\x27]([^"\x27]+)["\x27]'),
+    re.compile(r'axios\.[a-z]+\s*\(\s*["\x27]([^"\x27]+)["\x27]'),
 ]
-URL_PAT = r"https?://[a-zA-Z0-9\.\-/_?=&#%]+"
+
+URL_PATTERN = re.compile(r'https?://[a-zA-Z0-9\.\-/_?=&#%]+')
+SCRIPT_TAG_PATTERN = re.compile(r'<script[^>]+src=[\x22\x27]([^\x22\x27]+)', re.I)
 
 
-def extract_urls(html, base):
-    return [
-        urljoin(base, m)
-        for m in re.findall(r"<script[^>]+src=[\x22\x27]([^\x22\x27]+)", html or "", re.I)
-    ][:15]
+def extract_urls(html: str, base: str) -> List[str]:
+    """استخراج روابط ملفات الجافاسكريبت وتحويلها إلى روابط مطلقة بأمان."""
+    if not html:
+        return []
+    
+    urls = []
+    for m in SCRIPT_TAG_PATTERN.findall(html):
+        m_str = m.strip()
+        if m_str:
+            try:
+                absolute_url = urljoin(base, m_str)
+                urls.append(absolute_url)
+            except Exception:
+                continue
+    return urls[:20]
 
 
-def analyze(urls, max_js=10):
-    eps, exts = set(), set()
+def analyze(urls: List[str], max_js: int = 10) -> Tuple[List[str], List[str]]:
+    """تحليل ملفات الجافاسكريبت لاستخراج نقاط النهاية (Endpoints) والروابط الخارجية بدقة."""
+    eps: Set[str] = set()
+    exts: Set[str] = set()
+
+    if not urls:
+        return [], []
+
     for u in urls[:max_js]:
         try:
             r = http_get(u, timeout=6)
-            if r.status_code != 200:
+            if not r or r.status_code != 200 or not r.text:
                 continue
-            for p in JS_PATS:
-                for m in re.findall(p, r.text):
-                    if m.startswith("/") and len(m) < 200:
-                        eps.add(m)
-            for m in re.findall(URL_PAT, r.text):
-                if len(m) < 200:
-                    exts.add(m)
+
+            text = r.text
+
+            # استخراج الـ Endpoints الداخلية باستخدام الأنماط المحسنة
+            for pat in JS_PATTERNS:
+                for m in pat.findall(text):
+                    if isinstance(m, tuple):
+                        m = m[0]
+                    clean_m = m.strip()
+                    if clean_m.startswith("/") and len(clean_m) < 200:
+                        eps.add(clean_m)
+
+            # استخراج الروابط الخارجية
+            for m in URL_PATTERN.findall(text):
+                clean_m = m.strip()
+                if len(clean_m) < 250:
+                    exts.add(clean_m)
+
         except Exception:
             continue
-    return list(eps)[:50], list(exts)[:20]
+
+    return list(eps)[:50], list(exts)[:30]

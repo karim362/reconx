@@ -24,6 +24,8 @@ class HostInfo:
     js_endpoints: list = field(default_factory=list)
     s3_buckets: list = field(default_factory=list)
     status_category: str = "unknown"
+    cname_chain: list = field(default_factory=list)
+    ip_intel: dict = field(default_factory=dict)
     soft404: bool = False
 
     def to_dict(self):
